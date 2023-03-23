@@ -54,7 +54,7 @@ This repository provides a Python script to transcribe a collection of waveform 
 Transcribe a collection of waveform audio files using the following command:
 
 ```
-transcribe-audio-files.py --input_path <input_dir_path> --output_path <output_dir_path> [--model_name <model_name>] [--language <language>] [--confidence_threshold <confidence_threshold>] [--device <device>] [--num_workers <num_workers>]
+transcribe-audio-files --input_path <input_dir_path> --output_path <output_dir_path> [--model_name <model_name>] [--language <language>] [--confidence_threshold <confidence_threshold>] [--device <device>] [--num_workers <num_workers>]
 ```
 
 Arguments:
