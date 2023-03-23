@@ -27,24 +27,24 @@ This repository provides a Python script to transcribe a collection of waveform 
 
 ### For development installation:
 
-1. Install the required packages:
+2. Install the required packages:
    ```
    pip install -r requirements.dev.txt
    ```
 
-1. Install the package in editable mode:
+3. Install the package in editable mode:
    ```
    pip install -e .
    ```
 
 ### For usage installation:
 
-1. Install the required packages:
+2. Install the required packages:
    ```
    pip install -r requirements.txt
    ```
 
-1. Install the package:
+3. Install the package:
    ```
    pip install .
    ```
@@ -54,7 +54,7 @@ This repository provides a Python script to transcribe a collection of waveform 
 Transcribe a collection of waveform audio files using the following command:
 
 ```
-python transcribe_audio_files.py --input_path <input_dir_path> --output_path <output_dir_path> [--model_name <model_name>] [--language <language>] [--confidence_threshold <confidence_threshold>] [--device <device>] [--num_workers <num_workers>]
+transcribe-audio-files.py --input_path <input_dir_path> --output_path <output_dir_path> [--model_name <model_name>] [--language <language>] [--confidence_threshold <confidence_threshold>] [--device <device>] [--num_workers <num_workers>]
 ```
 
 Arguments:
