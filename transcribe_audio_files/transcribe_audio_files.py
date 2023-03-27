@@ -122,7 +122,11 @@ def transcribe_audio(audio_file: str, language: str) -> Dict:
         return {}
 
     # transcribe the audio file using the loaded model
-    transcription_rslt = whisper.transcribe(model, audio, language = language, verbose = None)
+    try:
+        transcription_rslt = whisper.transcribe(model, audio, language = language, verbose = None)
+    except Exception as e:
+        logger.error(f"Error transcribing audio file: {e}")
+        return {}
 
     return transcription_rslt
 
