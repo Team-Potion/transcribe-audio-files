@@ -383,7 +383,7 @@ def init_worker(model_name: str, device: str) -> None:
     model = whisper.load_model(model_name, device = device)
 
 
-def process_audio_files(input_path: str, output_path: str, model_name: str, language: str, confidence_threshold: float, device: str, num_workers: int) -> None:
+def process_audio_files(input_path: str, output_path: str, model_name: str, language: str, confidence_threshold: float, device: str, num_workers: int, save_interval: int = 10000) -> None:
     """
     process_audio_files - function to process a collection of audio files by transcribing, splitting sentences, and exporting the results using parallel processing
 
@@ -395,6 +395,7 @@ def process_audio_files(input_path: str, output_path: str, model_name: str, lang
         confidence_threshold (float): The minimum confidence threshold for considering transcribed words / sentences.
         device (str): The device to use for processing, e.g., 'cuda' or 'cpu'.
         num_workers (int): The number of worker processes to use for parallel processing.
+        save_interval (int): The number of processed files to save before writing to disk.
 
     Returns:
         None
@@ -411,6 +412,7 @@ def process_audio_files(input_path: str, output_path: str, model_name: str, lang
     # create a list of tasks where each task represents the processing of a single audio file
     # (a task is a tuple containing the input file path, output file path, language, and confidence_threshold)
     tasks = []
+    num_processed_files = 0
     for filename in wav_files:
         input_file_path = os.path.join(input_path, filename)
         output_file_path = os.path.join(output_path, filename)
@@ -422,6 +424,11 @@ def process_audio_files(input_path: str, output_path: str, model_name: str, lang
             processed_files.add(input_file_path)
 
         tasks.append((input_file_path, output_file_path, language, confidence_threshold))
+        num_processed_files += 1
+
+        if num_processed_files % save_interval == 0:
+            save_processed_files(processed_files, processed_files_path)
+            num_processed_files = 0
 
     # create a multiprocessing pool with the specified number of workers
     with multiprocessing.Pool(num_workers, initializer = init_worker, initargs = (model_name, device)) as pool:
