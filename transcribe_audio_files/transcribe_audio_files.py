@@ -284,6 +284,11 @@ def process_audio_file(input_path: str, output_path: str, language: str, confide
     # transcribe audio
     transcription = transcribe_audio(input_path, language)
 
+    # ensure a transcription has been returned
+    if transcription == {}:
+        logger.error(f"Error: No transcription result for {input_path}.")
+        return
+
     # ensure a segments section is in the transcription
     if not transcription["segments"]:
         logger.error(f"Error: Transcription result for {input_path} is missing the 'segments' key.")
