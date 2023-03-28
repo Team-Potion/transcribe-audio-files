@@ -7,7 +7,9 @@ import argparse
 
 from typing import List, Dict, Set, Tuple, Optional, Any
 
-import multiprocessing
+from multiprocessing import Pool, Manager, Value, Lock
+from functools import partial
+
 import pickle
 from tqdm import tqdm
 
@@ -350,7 +352,7 @@ def process_audio_file(input_path: str, output_path: str, language: str, confide
     return
 
 
-def process_audio_file_wrapper(args: Tuple[str, str, str, float]) -> Any:
+def process_audio_file_wrapper(args: Tuple[str, str, str, float], shared_counter: Value, counter_lock: Lock, processed_files: dict, processed_files_path: str, save_interval: int) -> Any:
     """
     process_audio_file_wrapper - wrapper function to pass multiple arguments to the process_audio_file function for use with multiprocessing
 
@@ -360,11 +362,30 @@ def process_audio_file_wrapper(args: Tuple[str, str, str, float]) -> Any:
             2. output_path (str): The path to the output directory where the results will be saved.
             3. language (str): The target language for transcribing the audio file.
             4. confidence_threshold (float): The minimum confidence threshold for considering transcribed words / sentences.
+        shared_counter (Value): A shared counter for tracking the number of processed audio files.
+        counter_lock (Lock): A lock for synchronizing access to the shared counter.
+        processed_files (dict): A shared dictionary containing the paths of the processed audio files as keys.
+        processed_files_path (str): The path to the file containing the serialized set of processed audio files.
+        save_interval (int): The number of processed files to save before writing to disk.
 
     Returns:
         Any: The return value of the process_audio_file function (None in this case).
     """
-    return process_audio_file(*args)
+
+    # call the process_audio_file function with the provided arguments
+    result = process_audio_file(*args)
+
+    # safely increment the shared counter using the counter_lock
+    with counter_lock:
+        input_file_path = args[0]   # extract the input file path from the args tuple
+        processed_files[input_file_path] = None   # add the input file path to the processed_files dictionary
+        shared_counter.value += 1
+
+        # save the processed files when the counter reaches the save_interval
+        if shared_counter.value % save_interval == 0:
+            save_processed_files(set(processed_files.keys()), processed_files_path)
+
+    return result
 
 
 def init_worker(model_name: str, device: str) -> None:
@@ -381,6 +402,20 @@ def init_worker(model_name: str, device: str) -> None:
 
     global model
     model = whisper.load_model(model_name, device = device)
+
+
+def managed_set(manager: Manager) -> dict:
+    """
+    Create a managed set using a Manager object.
+
+    Arguments:
+        manager (Manager): A Manager object.
+
+    Returns:
+        dict: A dictionary with set-like operations.
+    """
+    return manager.dict(enumerate(set()))
+
 
 
 def process_audio_files(input_path: str, output_path: str, model_name: str, language: str, confidence_threshold: float, device: str, num_workers: int, save_interval: int = 10000) -> None:
@@ -410,33 +445,41 @@ def process_audio_files(input_path: str, output_path: str, model_name: str, lang
     processed_files = load_processed_files(processed_files_path)
 
     # create a list of tasks where each task represents the processing of a single audio file
-    # (a task is a tuple containing the input file path, output file path, language, and confidence_threshold)
     tasks = []
-    num_processed_files = 0
     for filename in wav_files:
         input_file_path = os.path.join(input_path, filename)
         output_file_path = os.path.join(output_path, filename)
 
-        # Skip files that have already been processed
+        # skip files that have already been processed
         if input_file_path in processed_files:
             continue
         else:
             processed_files.add(input_file_path)
 
         tasks.append((input_file_path, output_file_path, language, confidence_threshold))
-        num_processed_files += 1
 
-        if num_processed_files % save_interval == 0:
-            save_processed_files(processed_files, processed_files_path)
-            num_processed_files = 0
+    # create a multiprocessing manager
+    manager = Manager()
+
+    # create a shared counter and a lock for synchronization
+    shared_counter = manager.Value('i', 0)
+    counter_lock = manager.Lock()
+
+    # create a shared dictionary for processed files
+    processed_files_dict = manager.dict()
+    for file in load_processed_files(processed_files_path):
+        processed_files_dict[file] = None
+
+    # create a partial function with the shared counter, lock, and other required arguments
+    process_audio_file_wrapper_with_shared_data = partial(process_audio_file_wrapper, shared_counter = shared_counter, counter_lock = counter_lock, processed_files = processed_files_dict, processed_files_path=processed_files_path, save_interval = save_interval)
 
     # create a multiprocessing pool with the specified number of workers
-    with multiprocessing.Pool(num_workers, initializer = init_worker, initargs = (model_name, device)) as pool:
-        # use imap() to apply the process_audio_file_wrapper() function to each task in the tasks list; and
-        # wrap the iterator with tqdm to display a progress bar
-        results = list(tqdm(pool.imap(process_audio_file_wrapper, tasks), total = len(tasks)))
+    with Pool(num_workers, initializer = init_worker, initargs = (model_name, device)) as pool:
+        # use the partial function in the imap call
+        results = list(tqdm(pool.imap(process_audio_file_wrapper_with_shared_data, tasks), total = len(tasks)))
 
-    save_processed_files(processed_files, processed_files_path)
+    # save the processed files to disk using the updated managed dictionary
+    save_processed_files(set(processed_files_dict.keys()), processed_files_path)
 
 
 def main() -> None:
