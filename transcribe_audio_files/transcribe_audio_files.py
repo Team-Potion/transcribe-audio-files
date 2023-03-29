@@ -37,6 +37,7 @@ def parse_cmdline_args() -> argparse.Namespace:
         --confidence_threshold (float): The minimum confidence threshold for considering transcribed words. Default is 0.45.
         --device (str): The device to use for processing. Default is "cuda".
         --num_workers (int): The number of worker processes to use for parallel processing. Default is 2.
+        --checkpoint_interval (int): The number of audio files to process before saving the processed files list to disk. Default is 10000.
     
     Returns:
         argparse.Namespace: A namespace containing the parsed arguments.
@@ -61,6 +62,8 @@ def parse_cmdline_args() -> argparse.Namespace:
         help = "The device to use for processing.")
     parser.add_argument("--num_workers",          type = int, default = 2,
         help = "The number of worker processes to use for parallel processing.")
+    parser.add_argument("--checkpoint_interval",  type = int, default = 10000,
+        help = "The number of audio files to process before saving the processed files list to disk.")
 
     # return the parsed arguments
     return parser.parse_args()
@@ -352,7 +355,7 @@ def process_audio_file(input_path: str, output_path: str, language: str, confide
     return
 
 
-def process_audio_file_wrapper(args: Tuple[str, str, str, float], shared_counter: Value, counter_lock: Lock, processed_files: dict, processed_files_path: str, save_interval: int) -> Any:
+def process_audio_file_wrapper(args: Tuple[str, str, str, float], shared_counter: Value, counter_lock: Lock, processed_files: dict, processed_files_path: str, checkpoint_interval: int) -> Any:
     """
     process_audio_file_wrapper - wrapper function to pass multiple arguments to the process_audio_file function for use with multiprocessing
 
@@ -366,7 +369,7 @@ def process_audio_file_wrapper(args: Tuple[str, str, str, float], shared_counter
         counter_lock (Lock): A lock for synchronizing access to the shared counter.
         processed_files (dict): A shared dictionary containing the paths of the processed audio files as keys.
         processed_files_path (str): The path to the file containing the serialized set of processed audio files.
-        save_interval (int): The number of processed files to save before writing to disk.
+        checkpoint_interval (int): The number of audio files to process before saving the processed files list to disk.
 
     Returns:
         Any: The return value of the process_audio_file function (None in this case).
@@ -381,8 +384,8 @@ def process_audio_file_wrapper(args: Tuple[str, str, str, float], shared_counter
         processed_files[input_file_path] = None   # add the input file path to the processed_files dictionary
         shared_counter.value += 1
 
-        # save the processed files when the counter reaches the save_interval
-        if shared_counter.value % save_interval == 0:
+        # save the processed files when the counter reaches the checkpoint_interval
+        if shared_counter.value % checkpoint_interval == 0:
             save_processed_files(set(processed_files.keys()), processed_files_path)
 
     return result
@@ -418,7 +421,7 @@ def managed_set(manager: Manager) -> dict:
 
 
 
-def process_audio_files(input_path: str, output_path: str, model_name: str, language: str, confidence_threshold: float, device: str, num_workers: int, save_interval: int = 10000) -> None:
+def process_audio_files(input_path: str, output_path: str, model_name: str, language: str, confidence_threshold: float, device: str, num_workers: int, checkpoint_interval: int) -> None:
     """
     process_audio_files - function to process a collection of audio files by transcribing, splitting sentences, and exporting the results using parallel processing
 
@@ -430,7 +433,7 @@ def process_audio_files(input_path: str, output_path: str, model_name: str, lang
         confidence_threshold (float): The minimum confidence threshold for considering transcribed words / sentences.
         device (str): The device to use for processing, e.g., 'cuda' or 'cpu'.
         num_workers (int): The number of worker processes to use for parallel processing.
-        save_interval (int): The number of processed files to save before writing to disk.
+        checkpoint_interval (int): The number of audio files to process before saving the processed files list to disk.
 
     Returns:
         None
@@ -471,7 +474,7 @@ def process_audio_files(input_path: str, output_path: str, model_name: str, lang
         processed_files_dict[file] = None
 
     # create a partial function with the shared counter, lock, and other required arguments
-    process_audio_file_wrapper_with_shared_data = partial(process_audio_file_wrapper, shared_counter = shared_counter, counter_lock = counter_lock, processed_files = processed_files_dict, processed_files_path=processed_files_path, save_interval = save_interval)
+    process_audio_file_wrapper_with_shared_data = partial(process_audio_file_wrapper, shared_counter = shared_counter, counter_lock = counter_lock, processed_files = processed_files_dict, processed_files_path = processed_files_path, checkpoint_interval = checkpoint_interval)
 
     # create a multiprocessing pool with the specified number of workers
     with Pool(num_workers, initializer = init_worker, initargs = (model_name, device)) as pool:
@@ -496,6 +499,7 @@ def main() -> None:
         --confidence_threshold (float): The minimum confidence threshold for considering transcribed words. Default is 0.45.
         --device (str): The device to use for processing. Default is "cuda".
         --num_workers (int): The number of worker processes to use for parallel processing. Default is 2.
+        --checkpoint_interval (int): The number of audio files to process before saving the processed files list to disk.
     
     Returns:
         None
@@ -511,4 +515,4 @@ def main() -> None:
     download_tokenizer(args.language)
 
     # call the main function
-    process_audio_files(args.input_path, args.output_path, args.model_name, args.language, args.confidence_threshold, args.device, args.num_workers)
+    process_audio_files(args.input_path, args.output_path, args.model_name, args.language, args.confidence_threshold, args.device, args.num_workers, args.checkpoint_interval)
