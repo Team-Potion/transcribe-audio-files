@@ -55,7 +55,7 @@ This repository provides a Python script to transcribe a collection of waveform 
 Transcribe a collection of waveform audio files using the following command:
 
 ```
-transcribe-audio-files --input_path <input_dir_path> --output_path <output_dir_path> [--model_name <model_name>] [--language <language>] [--confidence_threshold <confidence_threshold>] [--device <device>] [--num_workers <num_workers>] [--checkpoint_interval <checkpoint_interval>]
+transcribe-audio-files --input_path <input_dir_path> --output_path <output_dir_path> [--model_name <model_name>] [--language <language>] [--confidence_threshold <confidence_threshold>] [--device <device>] [--num_workers <num_workers>] [--checkpoint_interval <checkpoint_interval>] [--no_split_patterns <no_split_patterns>] [--verbose]
 ```
 
 Arguments:
@@ -68,6 +68,8 @@ Arguments:
 - `--device` (str, optional): The device to use for processing. Default is "cuda".
 - `--num_workers` (int, optional): The number of worker processes to use for parallel processing. Default is 2.
 - `--checkpoint_interval` (int, optional): The number of audio files to process before saving the processed files list to disk. Default is 10000.
+- `--no_split_patterns` (str or list of str, optional): The naming convention pattern(s) to avoid splitting of audio files. Default is None.
+- `--verbose` (bool, default = False, optional): Increase the log level to INFO; default is WARNING.
 
 ## Performance
 
