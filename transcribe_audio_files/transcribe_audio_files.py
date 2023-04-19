@@ -332,15 +332,19 @@ def process_audio_file(input_path: str, output_path: str, language: str, confide
 
     # test if there are more than one sentence in the transcription result
     if (len(aligned_sentences) > 1):
-
         # slice the input_path file (by sentences)
         audio = AudioSegment.from_wav(input_path)
         for i, (start, end) in enumerate(zip(sentence_cuts[:-1], sentence_cuts[1:]), start = 1):
+            # ensure the index is within the range of the aligned_sentences list
+            if i - 1 >= len(aligned_sentences):
+                logger.error(f"Index (aligned_sentences) out of range: {i - 1}")
+                break
+
             # determine if the sentence's confidence_score is above the threshold
             if aligned_sentences[i - 1]["confidence_score"] < confidence_threshold:
                 logger.info(f"Dropping sentence {i:03d} from ({input_path}) due to low confidence score ({aligned_sentences[i - 1]['confidence_score']}).")
                 continue
- 
+
             # slice the audio files by sentence
             try:
                 sliced_audio = audio[max(0, int(start * 1000)):int(end * 1000)]
@@ -350,6 +354,11 @@ def process_audio_file(input_path: str, output_path: str, language: str, confide
 
         # save transcriptions for each sliced audio segment
         for i, sentence in enumerate(aligned_sentences, start = 1):
+            # ensure the index is within the range of the aligned_sentences list
+            if i - 1 >= len(aligned_sentences):
+                logger.error(f"Index (aligned_sentences) out of range: {i - 1}")
+                break
+
             # determine if the sentence's confidence_score is above the threshold
             if aligned_sentences[i - 1]["confidence_score"] < confidence_threshold:
                 logger.info(f"Dropping sentence {i:03d} from ({input_path}) due to low confidence score ({aligned_sentences[i - 1]['confidence_score']}).")
