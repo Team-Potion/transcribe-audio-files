@@ -5,14 +5,13 @@ import sys
 import logging
 
 
-def configure_logging(log_level: int = logging.INFO, log_file: str = None) -> None:
+def configure_logging(log_level: int, log_file: str = None) -> None:
     """
     Configure the logger with a specified log level and an optional log file. If a log file is provided,
         the logs will be written to the file as well as  to the console.
 
     Args:
         log_level (int, optional): The desired logging level (e.g., logging.INFO, logging.DEBUG, etc.). 
-            Default is logging.INFO.
         log_file (str, optional): The path to the log file where logs will be written. If not provided, 
             logs will be written to the console. Default is None.
 
@@ -42,16 +41,25 @@ def configure_logging(log_level: int = logging.INFO, log_file: str = None) -> No
         root_logger.addHandler(file_handler)
 
 
-def get_logger(name: str) -> logging.Logger:
+def get_logger(name: str, log_level: int = logging.WARNING, log_file: str = None) -> logging.Logger:
     """
     Get a logger with a specific name.
 
     Args:
         name (str): The desired name for the logger.
+        log_level (int, optional): The desired logging level (e.g., logging.INFO, logging.DEBUG, etc.). 
+            Default is logging.INFO.
+        log_file (str, optional): The path to the log file where logs will be written. If not provided, 
+            logs will be written to the console. Default is None.
 
     Returns:
         logging.Logger: The logger object.
     """
+
+    # configure logging with the specified log level and log file
+    configure_logging(log_level = log_level, log_file = log_file)
+
+    # get the logger with the specified name
     logger = logging.getLogger(name)
 
     return logger

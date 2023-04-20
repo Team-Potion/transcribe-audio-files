@@ -21,8 +21,9 @@ import nltk
 from nltk.tokenize import PunktSentenceTokenizer
 
 # enable logging
+import logging
 from .logging_utils import get_logger
-logger = get_logger(__name__)
+logger = None
 
 
 def parse_cmdline_args() -> argparse.Namespace:
@@ -38,7 +39,9 @@ def parse_cmdline_args() -> argparse.Namespace:
         --device (str): The device to use for processing. Default is "cuda".
         --num_workers (int): The number of worker processes to use for parallel processing. Default is 2.
         --checkpoint_interval (int): The number of audio files to process before saving the processed files list to disk. Default is 10000.
-    
+        --no_split_patterns (str or list of str): The naming convention pattern(s) to avoid splitting of audio files. Default is None.
+        --verbose (bool, default = False): Increase the log level to INFO; default is WARNING.
+
     Returns:
         argparse.Namespace: A namespace containing the parsed arguments.
     """
@@ -64,6 +67,10 @@ def parse_cmdline_args() -> argparse.Namespace:
         help = "The number of worker processes to use for parallel processing.")
     parser.add_argument("--checkpoint_interval",  type = int, default = 10000,
         help = "The number of audio files to process before saving the processed files list to disk.")
+    parser.add_argument("--no_split_patterns",    type = str, nargs = "+", default = None,
+        help = "Naming convention pattern(s) to avoid splitting of audio files.")
+    parser.add_argument("--verbose",              action = "store_true",
+        help = "Increase the log level to INFO; default is WARNING.")
 
     # return the parsed arguments
     return parser.parse_args()
@@ -100,7 +107,7 @@ def load_tokenizer(language: str) -> Optional[PunktSentenceTokenizer]:
     try:
         tokenizer = nltk.data.load(f"tokenizers/punkt/{language.lower()}.pickle")
     except LookupError:
-        print(f"Error: No Punkt tokenizer found for '{language}'.")
+        logger.error(f"Error: No Punkt tokenizer found for '{language}'.")
         return None
     return tokenizer
 
@@ -272,7 +279,7 @@ def save_processed_files(processed_files: Set[str], processed_files_path: str) -
         logger.error(f"Error saving processed files: {e}")
 
 
-def process_audio_file(input_path: str, output_path: str, language: str, confidence_threshold: float) -> None:
+def process_audio_file(input_path: str, output_path: str, language: str, confidence_threshold: float, no_split_patterns: List[str] = None) -> None:
     """
     process_audio_file - function to process a single audio file by transcribing it, splitting sentences, and exporting the results
 
@@ -281,10 +288,14 @@ def process_audio_file(input_path: str, output_path: str, language: str, confide
         output_path (str): The path to the output directory where the results will be saved.
         language (str): The target language for transcribing the audio file.
         confidence_threshold (float): The minimum confidence threshold for considering transcribed words / sentences.
+        no_split_patterns (List[str]): Naming convention pattern(s) to avoid splitting of audio files. Default is None.
 
     Returns:
         None
     """
+
+    # remove the original extension from output_path
+    output_path_wo_ext, _ = os.path.splitext(output_path)
 
     # transcribe audio
     transcription = transcribe_audio(input_path, language)
@@ -299,23 +310,41 @@ def process_audio_file(input_path: str, output_path: str, language: str, confide
         logger.error(f"Error: Transcription result for {input_path} is missing the 'segments' key.")
         return
 
+    # check if the input file matches any of the no_split_patterns
+    if no_split_patterns is not None:
+        for pattern in no_split_patterns:
+            if pattern in os.path.basename(input_path):
+                # if the input file matches any of the patterns, copy the waveform file to the output folder
+                copy_file(input_path, output_path)
+
+                # then write the transcription to file
+                try:
+                    with open(f"{output_path_wo_ext}.txt", "w") as f:
+                        f.write(transcription["segments"][0]["text"].strip())
+                except IOError as e:
+                    logger.error(f"Error writing to file {output_path_wo_ext}.txt: {e}")
+
+                logger.info(f"Skipping splitting for {input_path} due to matching no_split_patterns.")
+                return
+
     # split sentences, align confidence scores, and determine cut points
     aligned_sentences, sentence_cuts = transcription_to_sentences(transcription, language)
 
     # test if there are more than one sentence in the transcription result
     if (len(aligned_sentences) > 1):
-
-        # remove the original extension from output_path
-        output_path_wo_ext, _ = os.path.splitext(output_path)
-
         # slice the input_path file (by sentences)
         audio = AudioSegment.from_wav(input_path)
         for i, (start, end) in enumerate(zip(sentence_cuts[:-1], sentence_cuts[1:]), start = 1):
+            # ensure the index is within the range of the aligned_sentences list
+            if i - 1 >= len(aligned_sentences):
+                logger.error(f"Index (aligned_sentences) out of range: {i - 1}")
+                break
+
             # determine if the sentence's confidence_score is above the threshold
             if aligned_sentences[i - 1]["confidence_score"] < confidence_threshold:
                 logger.info(f"Dropping sentence {i:03d} from ({input_path}) due to low confidence score ({aligned_sentences[i - 1]['confidence_score']}).")
                 continue
- 
+
             # slice the audio files by sentence
             try:
                 sliced_audio = audio[max(0, int(start * 1000)):int(end * 1000)]
@@ -325,6 +354,11 @@ def process_audio_file(input_path: str, output_path: str, language: str, confide
 
         # save transcriptions for each sliced audio segment
         for i, sentence in enumerate(aligned_sentences, start = 1):
+            # ensure the index is within the range of the aligned_sentences list
+            if i - 1 >= len(aligned_sentences):
+                logger.error(f"Index (aligned_sentences) out of range: {i - 1}")
+                break
+
             # determine if the sentence's confidence_score is above the threshold
             if aligned_sentences[i - 1]["confidence_score"] < confidence_threshold:
                 logger.info(f"Dropping sentence {i:03d} from ({input_path}) due to low confidence score ({aligned_sentences[i - 1]['confidence_score']}).")
@@ -347,15 +381,15 @@ def process_audio_file(input_path: str, output_path: str, language: str, confide
 
         # write transcription to file
         try:
-            with open(f"{output_path}.txt", "w") as f:
+            with open(f"{output_path_wo_ext}.txt", "w") as f:
                 f.write(aligned_sentences[0]["text"].strip())
         except IOError as e:
-            logger.error(f"Error writing to file {output_path}.txt: {e}")
+            logger.error(f"Error writing to file {output_path_wo_ext}.txt: {e}")
 
     return
 
 
-def process_audio_file_wrapper(args: Tuple[str, str, str, float], shared_counter: Value, counter_lock: Lock, processed_files: dict, processed_files_path: str, checkpoint_interval: int) -> Any:
+def process_audio_file_wrapper(args: Tuple[str, str, str, float], shared_counter: Value, counter_lock: Lock, processed_files: dict, processed_files_path: str, checkpoint_interval: int, no_split_patterns: List[str] = None) -> Any:
     """
     process_audio_file_wrapper - wrapper function to pass multiple arguments to the process_audio_file function for use with multiprocessing
 
@@ -370,6 +404,7 @@ def process_audio_file_wrapper(args: Tuple[str, str, str, float], shared_counter
         processed_files (dict): A shared dictionary containing the paths of the processed audio files as keys.
         processed_files_path (str): The path to the file containing the serialized set of processed audio files.
         checkpoint_interval (int): The number of audio files to process before saving the processed files list to disk.
+        no_split_patterns (List[str]): Naming convention pattern(s) to avoid splitting of audio files. Default is None.
 
     Returns:
         Any: The return value of the process_audio_file function (None in this case).
@@ -420,8 +455,7 @@ def managed_set(manager: Manager) -> dict:
     return manager.dict(enumerate(set()))
 
 
-
-def process_audio_files(input_path: str, output_path: str, model_name: str, language: str, confidence_threshold: float, device: str, num_workers: int, checkpoint_interval: int) -> None:
+def process_audio_files(input_path: str, output_path: str, model_name: str, language: str, confidence_threshold: float, device: str, num_workers: int, checkpoint_interval: int, no_split_patterns: List[str] = None) -> None:
     """
     process_audio_files - function to process a collection of audio files by transcribing, splitting sentences, and exporting the results using parallel processing
 
@@ -434,6 +468,7 @@ def process_audio_files(input_path: str, output_path: str, model_name: str, lang
         device (str): The device to use for processing, e.g., 'cuda' or 'cpu'.
         num_workers (int): The number of worker processes to use for parallel processing.
         checkpoint_interval (int): The number of audio files to process before saving the processed files list to disk.
+        no_split_patterns (List[str]): Naming convention pattern(s) to avoid splitting of audio files. Default is None.
 
     Returns:
         None
@@ -459,7 +494,7 @@ def process_audio_files(input_path: str, output_path: str, model_name: str, lang
         else:
             processed_files.add(input_file_path)
 
-        tasks.append((input_file_path, output_file_path, language, confidence_threshold))
+        tasks.append((input_file_path, output_file_path, language, confidence_threshold, no_split_patterns))
 
     # create a multiprocessing manager
     manager = Manager()
@@ -474,7 +509,7 @@ def process_audio_files(input_path: str, output_path: str, model_name: str, lang
         processed_files_dict[file] = None
 
     # create a partial function with the shared counter, lock, and other required arguments
-    process_audio_file_wrapper_with_shared_data = partial(process_audio_file_wrapper, shared_counter = shared_counter, counter_lock = counter_lock, processed_files = processed_files_dict, processed_files_path = processed_files_path, checkpoint_interval = checkpoint_interval)
+    process_audio_file_wrapper_with_shared_data = partial(process_audio_file_wrapper, shared_counter = shared_counter, counter_lock = counter_lock, processed_files = processed_files_dict, processed_files_path = processed_files_path, checkpoint_interval = checkpoint_interval, no_split_patterns = no_split_patterns)
 
     # create a multiprocessing pool with the specified number of workers
     with Pool(num_workers, initializer = init_worker, initargs = (model_name, device)) as pool:
@@ -489,7 +524,7 @@ def main() -> None:
     """
     main - the main function to transcribe a collection of waveform audio files using whisper-timestamped (https://github.com/linto-ai/whisper-timestamped).
 
-    Usage: transcribe-audio-files --input_path <input_dir_path> --output_path <output_dir_path> [--model_name <model_name>] [--language <language>] [--confidence_threshold <confidence_threshold>] [--device <device>] [--num_workers <num_workers>]
+    Usage: transcribe-audio-files --input_path <input_dir_path> --output_path <output_dir_path> [--model_name <model_name>] [--language <language>] [--confidence_threshold <confidence_threshold>] [--device <device>] [--num_workers <num_workers>] [--checkpoint_interval <checkpoint_interval>] [--no_split_patterns <no_split_patterns>] [--verbose]
 
     Arguments:
         --input_path (str): The path to the directory containing the collection of waveform audio files to be transcribed.
@@ -499,7 +534,9 @@ def main() -> None:
         --confidence_threshold (float): The minimum confidence threshold for considering transcribed words. Default is 0.45.
         --device (str): The device to use for processing. Default is "cuda".
         --num_workers (int): The number of worker processes to use for parallel processing. Default is 2.
-        --checkpoint_interval (int): The number of audio files to process before saving the processed files list to disk.
+        --checkpoint_interval (int): The number of audio files to process before saving the processed files list to disk. Default is 10000.
+        --no_split_patterns (str or list of str): The naming convention pattern(s) to avoid splitting of audio files. Default is None.
+        --verbose (bool, default = False): Increase the log level to INFO; default is WARNING.
     
     Returns:
         None
@@ -508,6 +545,11 @@ def main() -> None:
     # parse command line arguments
     args = parse_cmdline_args()
 
+    # set the log level based on the --verbose option and enable logging
+    global logger
+    log_level = logging.INFO if args.verbose else logging.WARNING
+    logger = get_logger(__name__, log_level = log_level)
+
     # ensure the output path exists
     os.makedirs(args.output_path, exist_ok = True)
 
@@ -515,4 +557,4 @@ def main() -> None:
     download_tokenizer(args.language)
 
     # call the main function
-    process_audio_files(args.input_path, args.output_path, args.model_name, args.language, args.confidence_threshold, args.device, args.num_workers, args.checkpoint_interval)
+    process_audio_files(args.input_path, args.output_path, args.model_name, args.language, args.confidence_threshold, args.device, args.num_workers, args.checkpoint_interval, args.no_split_patterns)
